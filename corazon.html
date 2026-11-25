@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <!-- Empty inline icon: stops the browser fetching /favicon.ico, which
+         lives outside the artifact's routes and 404s. -->
+    <link rel="icon" href="data:," />
+    <title>Te amo en todos los idiomas</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #000000;
+        --ink: #ff2e3f;
+        --ink-soft: #ff7285;
+        --ink-dim: #c24355;
+        --line: #4d0f1a;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        overflow: hidden;
+      }
+      header {
+        padding: calc(10px + env(safe-area-inset-top)) 16px 2px;
+        text-align: center;
+        flex: 0 0 auto;
+      }
+      header h1 {
+        margin: 0;
+        font-family: "Dancing Script", "Segoe Script", cursive;
+        font-weight: 700;
+        font-size: clamp(21px, 5.2vw, 30px);
+        letter-spacing: 0.02em;
+        color: var(--ink-soft);
+        text-shadow: 0 0 14px rgba(255, 30, 60, 0.45);
+      }
+      main {
+        flex: 1 1 auto;
+        min-height: 0;
+        position: relative;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        cursor: grab;
+      }
+      canvas.dragging { cursor: grabbing; }
+      footer {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 18px calc(12px + env(safe-area-inset-bottom));
+      }
+      .firma {
+        margin: 0;
+        font-family: "Dancing Script", "Segoe Script", cursive;
+        font-weight: 600;
+        font-size: clamp(17px, 4.4vw, 21px);
+        color: var(--ink-dim);
+        transition: color 1.2s ease, text-shadow 1.2s ease;
+      }
+      body.complete .firma {
+        color: var(--ink-soft);
+        text-shadow: 0 0 12px rgba(255, 30, 60, 0.5);
+      }
+      #replay {
+        min-height: 40px;
+        padding: 8px 18px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255, 30, 60, 0.07);
+        color: var(--ink-soft);
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #replay:hover { background: rgba(255, 30, 60, 0.16); }
+      #replay:active { transform: scale(0.97); }
+      #replay:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Para ti, Fernandita</h1>
+    </header>
+    <main>
+      <canvas
+        id="heart"
+        role="img"
+        aria-label="Un corazón que se va llenando poco a poco con la frase «te amo» escrita en muchos idiomas, en letras rojas sobre fondo negro. Se puede arrastrar con el dedo o el mouse para moverlo, y con doble toque regresa al centro."
+      ></canvas>
+    </main>
+    <footer>
+      <p class="firma">Hecho por tu osito 🧸</p>
+      <button id="replay" type="button">↻ Ver de nuevo</button>
+    </footer>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var PHRASES = [
+          "Te amo", "I love you", "Je t'aime", "Ich liebe dich",
+          "Seni seviyorum", "Ti amo", "Eu te amo", "Jag älskar dig",
+          "Kocham cię", "Aku cinta kamu", "Ik hou van jou", "Anh yêu em",
+          "사랑해", "Я тебя люблю", "愛してる", "我爱你",
+          "Σ' αγαπώ", "Te iubesc", "Szeretlek", "Miluji tě",
+          "Mahal kita", "أحبك", "אני אוהב אותך", "Volim te",
+          "T'estimo", "Rakastan sinua", "Jeg elsker deg", "Обичам те"
+        ];
+        var REDS = ["#ff2438", "#ff2e2e", "#e80f26", "#ff4545", "#f91b1b", "#ff3355"];
+        var FILL_MS = 13000;      // tiempo en llenarse el corazón
+        var POP_MS = 380;         // animación de entrada de cada frase
+        var FONT_STACK = '"Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif';
+
+        var canvas = document.getElementById("heart");
+        var ctx = canvas.getContext("2d");
+        var replayBtn = document.getElementById("replay");
+        var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        var W = 0, H = 0, DPR = 1;
+        var points = [];          // {x, y, text, color, fs, at}
+        var particles = [];       // corazoncitos flotantes
+        var start = 0;
+        var done = false;
+        var tapPulse = 0;
+        var lastAmbient = 0;
+
+        // Arrastre: el corazón se puede mover con el dedo o el mouse.
+        var offX = 0, offY = 0;       // desplazamiento actual del corazón
+        var velX = 0, velY = 0;       // inercia al soltar
+        var dragging = false;
+        var dragId = null;
+        var dragStartX = 0, dragStartY = 0;
+        var dragOffX = 0, dragOffY = 0;
+        var dragMoved = 0;
+        var lastMoveX = 0, lastMoveY = 0, lastMoveT = 0;
+
+        // ---- Geometría del corazón (curva paramétrica clásica) ----
+        function heartPoint(t) {
+          var s = Math.sin(t);
+          return [
+            16 * s * s * s,
+            13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)
+          ];
+        }
+        function makePolygon(scaleAboutCenter) {
+          var cx = 0, cy = -2.5, pts = [], i, p;
+          for (i = 0; i < 260; i++) {
+            p = heartPoint((i / 260) * Math.PI * 2);
+            pts.push([
+              cx + (p[0] - cx) * scaleAboutCenter,
+              cy + (p[1] - cy) * scaleAboutCenter
+            ]);
+          }
+          return pts;
+        }
+        function inside(poly, x, y) {
+          var c = false, i, j, xi, yi, xj, yj;
+          for (i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            xi = poly[i][0]; yi = poly[i][1];
+            xj = poly[j][0]; yj = poly[j][1];
+            if (((yi > y) !== (yj > y)) &&
+                (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)) {
+              c = !c;
+            }
+          }
+          return c;
+        }
+        function shuffle(arr) {
+          var i, j, tmp;
+          for (i = arr.length - 1; i > 0; i--) {
+            j = Math.floor(Math.random() * (i + 1));
+            tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+          }
+          return arr;
+        }
+
+        function buildPoints() {
+          var rect = canvas.getBoundingClientRect();
+          W = Math.max(280, rect.width);
+          H = Math.max(280, rect.height);
+          DPR = Math.min(2, window.devicePixelRatio || 1);
+          canvas.width = Math.round(W * DPR);
+          canvas.height = Math.round(H * DPR);
+          ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+          var full = makePolygon(1);
+          var inset = makePolygon(0.9);
+          var minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9, i, p;
+          for (i = 0; i < full.length; i++) {
+            p = full[i];
+            if (p[0] < minX) minX = p[0];
+            if (p[0] > maxX) maxX = p[0];
+            if (p[1] < minY) minY = p[1];
+            if (p[1] > maxY) maxY = p[1];
+          }
+          var bw = maxX - minX, bh = maxY - minY;
+          var scale = Math.min((W * 0.94) / bw, (H * 0.94) / bh);
+          var cxPx = W / 2, cyPx = H / 2;
+          var ccx = (minX + maxX) / 2, ccy = (minY + maxY) / 2;
+
+          function toPx(ux, uy) {
+            return [cxPx + (ux - ccx) * scale, cyPx - (uy - ccy) * scale];
+          }
+          function toUnit(px, py) {
+            return [ccx + (px - cxPx) / scale, ccy - (py - cyPx) / scale];
+          }
+
+          var fs = Math.max(11, Math.min(21, Math.min(W, H) * 0.036));
+          var colW = fs * 4.35;
+          var rowH = fs * 1.62;
+
+          // Bolsa de frases mezclada para repartir los idiomas parejo.
+          var bag = [];
+          while (bag.length < 400) bag = bag.concat(shuffle(PHRASES.slice()));
+          var bi = 0;
+
+          var raw = [];
+          var y, x, px, py, u;
+          for (y = rowH * 0.6; y < H; y += rowH) {
+            var offset = ((Math.round(y / rowH) % 2) ? colW * 0.5 : 0);
+            for (x = offset + colW * 0.4; x < W; x += colW) {
+              px = x + (Math.random() - 0.5) * colW * 0.5;
+              py = y + (Math.random() - 0.5) * rowH * 0.5;
+              u = toUnit(px, py);
+              if (inside(inset, u[0], u[1])) {
+                raw.push({
+                  x: px, y: py,
+                  text: bag[bi++],
+                  color: REDS[Math.floor(Math.random() * REDS.length)],
+                  fs: fs * (0.92 + Math.random() * 0.16)
+                });
+              }
+            }
+          }
+
+          // Orden de aparición aleatorio: el corazón se llena parejo,
+          // frase por frase, como en el video.
+          var order = shuffle(raw.map(function (_, idx) { return idx; }));
+          points = raw.map(function (pt, idx) {
+            var pos = order.indexOf(idx);
+            pt.at = raw.length > 1 ? (pos / (raw.length - 1)) * FILL_MS : 0;
+            return pt;
+          });
+        }
+
+        function drawMiniHeart(x, y, s, color, alpha) {
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.scale(s, s);
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(0, 3.2);
+          ctx.bezierCurveTo(-4.6, -0.8, -2.6, -4.6, 0, -1.8);
+          ctx.bezierCurveTo(2.6, -4.6, 4.6, -0.8, 0, 3.2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        function spawnBurst(x, y, n) {
+          for (var i = 0; i < n; i++) {
+            var a = Math.random() * Math.PI * 2;
+            var v = 0.4 + Math.random() * 1.5;
+            particles.push({
+              x: x, y: y,
+              vx: Math.cos(a) * v, vy: Math.sin(a) * v - 0.7,
+              s: 1.1 + Math.random() * 1.6,
+              color: REDS[Math.floor(Math.random() * REDS.length)],
+              life: 1
+            });
+          }
+          if (particles.length > 90) particles.splice(0, particles.length - 90);
+        }
+
+        function clampOffset() {
+          var mx = W * 0.45, my = H * 0.45;
+          if (offX > mx) offX = mx;
+          if (offX < -mx) offX = -mx;
+          if (offY > my) offY = my;
+          if (offY < -my) offY = -my;
+        }
+
+        function frame(now) {
+          var elapsed = now - start;
+          ctx.clearRect(0, 0, W, H);
+
+          // Inercia: al soltar, el corazón sigue deslizándose un poco.
+          if (!dragging && (Math.abs(velX) > 0.02 || Math.abs(velY) > 0.02)) {
+            offX += velX;
+            offY += velY;
+            velX *= 0.94;
+            velY *= 0.94;
+            clampOffset();
+          }
+
+          var complete = elapsed >= FILL_MS + POP_MS;
+          if (complete && !done) {
+            done = true;
+            document.body.classList.add("complete");
+          }
+
+          // Latido suave cuando ya está completo (+ empujón al tocarlo).
+          var pulse = 1;
+          if (done && !reduceMotion) {
+            var beat = Math.pow(Math.max(0, Math.sin(now / 430)), 3) * 0.016;
+            var beat2 = Math.pow(Math.max(0, Math.sin(now / 430 - 0.9)), 3) * 0.009;
+            pulse = 1 + beat + beat2 + tapPulse * 0.05;
+          }
+          tapPulse *= 0.94;
+
+          ctx.save();
+          ctx.translate(W / 2 + offX, H / 2 + offY);
+          ctx.scale(pulse, pulse);
+          ctx.translate(-W / 2, -H / 2);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+
+          var i, p, local, alpha, pop;
+          for (i = 0; i < points.length; i++) {
+            p = points[i];
+            local = (elapsed - p.at) / POP_MS;
+            if (local <= 0) continue;
+            alpha = Math.min(1, local);
+            pop = reduceMotion ? 1 : 0.55 + 0.45 * (1 - Math.pow(1 - Math.min(1, local), 3));
+            ctx.globalAlpha = alpha;
+            ctx.font = "700 " + (p.fs * pop).toFixed(1) + "px " + FONT_STACK;
+            ctx.fillStyle = p.color;
+            ctx.fillText(p.text, p.x, p.y);
+          }
+          ctx.restore();
+          ctx.globalAlpha = 1;
+
+          // Corazoncitos flotantes ocasionales al terminar de llenarse.
+          if (done && !reduceMotion && now - lastAmbient > 1500 && points.length) {
+            lastAmbient = now;
+            var src = points[Math.floor(Math.random() * points.length)];
+            particles.push({
+              x: src.x + offX, y: src.y + offY, vx: (Math.random() - 0.5) * 0.2, vy: -0.45 - Math.random() * 0.3,
+              s: 1 + Math.random() * 1.1,
+              color: REDS[Math.floor(Math.random() * REDS.length)],
+              life: 1
+            });
+          }
+
+          // Partículas
+          for (i = particles.length - 1; i >= 0; i--) {
+            var q = particles[i];
+            q.x += q.vx; q.y += q.vy;
+            q.vy -= 0.004; q.vx *= 0.99;
+            q.life -= 0.008;
+            if (q.life <= 0) { particles.splice(i, 1); continue; }
+            drawMiniHeart(q.x, q.y, q.s, q.color, Math.min(1, q.life) * 0.9);
+          }
+
+          requestAnimationFrame(frame);
+        }
+
+        function restart() {
+          buildPoints();
+          particles = [];
+          done = false;
+          offX = 0; offY = 0; velX = 0; velY = 0;
+          dragging = false; dragId = null;
+          canvas.classList.remove("dragging");
+          document.body.classList.remove("complete");
+          start = performance.now() - (reduceMotion ? FILL_MS + POP_MS + 1 : 0);
+        }
+
+        canvas.addEventListener("pointerdown", function (e) {
+          if (dragging) return;
+          dragging = true;
+          dragId = e.pointerId;
+          dragStartX = lastMoveX = e.clientX;
+          dragStartY = lastMoveY = e.clientY;
+          lastMoveT = performance.now();
+          dragOffX = offX;
+          dragOffY = offY;
+          dragMoved = 0;
+          velX = 0; velY = 0;
+          canvas.classList.add("dragging");
+          if (canvas.setPointerCapture) {
+            try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+          }
+        });
+
+        canvas.addEventListener("pointermove", function (e) {
+          if (!dragging || e.pointerId !== dragId) return;
+          offX = dragOffX + (e.clientX - dragStartX);
+          offY = dragOffY + (e.clientY - dragStartY);
+          clampOffset();
+          var dx = e.clientX - dragStartX, dy = e.clientY - dragStartY;
+          dragMoved = Math.max(dragMoved, Math.sqrt(dx * dx + dy * dy));
+          var now = performance.now();
+          var dt = now - lastMoveT;
+          if (dt > 0) {
+            velX = (e.clientX - lastMoveX) / dt * 16;
+            velY = (e.clientY - lastMoveY) / dt * 16;
+          }
+          lastMoveX = e.clientX;
+          lastMoveY = e.clientY;
+          lastMoveT = now;
+        });
+
+        function endDrag(e) {
+          if (!dragging || e.pointerId !== dragId) return;
+          dragging = false;
+          dragId = null;
+          canvas.classList.remove("dragging");
+          if (dragMoved < 6) {
+            // Fue un toque, no un arrastre: explosión de corazoncitos.
+            velX = 0; velY = 0;
+            var rect = canvas.getBoundingClientRect();
+            var x = e.clientX - rect.left, y = e.clientY - rect.top;
+            tapPulse = 1;
+            if (!reduceMotion) spawnBurst(x, y, 14);
+          } else if (reduceMotion) {
+            velX = 0; velY = 0;
+          }
+        }
+        canvas.addEventListener("pointerup", endDrag);
+        canvas.addEventListener("pointercancel", endDrag);
+
+        // Doble toque o doble clic: el corazón regresa al centro.
+        canvas.addEventListener("dblclick", function () {
+          offX = 0; offY = 0; velX = 0; velY = 0;
+        });
+
+        replayBtn.addEventListener("click", restart);
+
+        var resizeTimer = null;
+        window.addEventListener("resize", function () {
+          clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(function () {
+            var frac = start ? Math.min(1, (performance.now() - start) / FILL_MS) : 0;
+            buildPoints();
+            start = performance.now() - frac * FILL_MS;
+            if (frac < 1) { done = false; document.body.classList.remove("complete"); }
+          }, 180);
+        });
+
+        restart();
+        requestAnimationFrame(frame);
+      })();
+    </script>
+  </body>
+</html>
